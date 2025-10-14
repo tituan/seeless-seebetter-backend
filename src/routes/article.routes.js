@@ -9,4 +9,7 @@ router.post("/", ctrl.create);
 router.patch("/:slug", ctrl.update);
 router.delete("/:slug", ctrl.remove);
 
+// 👉 route pour récupérer un article par catégorie + slug
+router.get("/by-category/:category/:slug", ctrl.getOneByCategory);
+
 export default router;

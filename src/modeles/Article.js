@@ -1,44 +1,29 @@
 import mongoose from "mongoose";
+import { CATEGORY_KEYS, normalizeCategory } from "../constants/categories.js";
 
-// util simple pour slugifier un titre
-function slugify(str) {
-  return String(str)
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "") // accents
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")    // caractères spéciaux
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-}
-
-const urlValidator = {
-  validator: (v) => !v || /^https?:\/\/.+/i.test(v),
-  message: "URL invalide (doit commencer par http:// ou https://)",
-};
+// ...
 
 const ArticleSchema = new mongoose.Schema(
   {
-    // Identité & routing
-    title:      { type: String, required: true, trim: true, minlength: 2, maxlength: 180 },
-    subtitle:   { type: String, trim: true, maxlength: 220 },
-    slug:       { type: String, unique: true, sparse: true, lowercase: true, index: true },
+    title:    { type: String, required: true, trim: true, minlength: 2, maxlength: 180 },
+    subtitle: { type: String, trim: true, maxlength: 220 },
+    slug:     { type: String, lowercase: true, index: true }, // on passe à un unique composé (voir index plus bas)
 
-    // Meta éditoriales
-    author:     { type: String, default: "SLSB", trim: true, maxlength: 80 },
-    category:   {
+    author:   { type: String, default: "SLSB", trim: true, maxlength: 80 },
+
+    // 🔒 Catégorie OBLIGATOIRE et contrôlée par enum
+    category: {
       type: String,
-      trim: true,
+      required: true,
       lowercase: true,
+      enum: CATEGORY_KEYS,
       index: true,
-      // libre, mais tu peux figer une liste si tu veux :
-      // enum: ["mode","musique","shopping","art","food","travel","tech","lifestyle","autre"]
     },
-    tags:       [{ type: String, trim: true, lowercase: true, maxlength: 40, index: true }],
 
-    // Placement / sections
-    sections:   {
-      type: [String], // ex. ["blog"] ou ["blog","actu"]
+    tags:     [{ type: String, trim: true, lowercase: true, maxlength: 40, index: true }],
+
+    sections: {
+      type: [String],
       default: ["blog"],
       validate: {
         validator: (arr) => arr.every(s => ["blog", "actu"].includes(String(s).toLowerCase())),
@@ -47,54 +32,55 @@ const ArticleSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Infos de contexte
-    date:       { type: Date },             // date éditoriale affichée (peut différer de createdAt)
-    location:   { type: String, trim: true, maxlength: 120 }, // lieu (Paris, etc.)
+    date:     { type: Date },
+    location: { type: String, trim: true, maxlength: 120 },
 
-    // Liens & médias
-    linkUrl:    { type: String, trim: true, validate: urlValidator }, // lien externe si besoin
-    imageUrl:   { type: String, trim: true, validate: urlValidator }, // visuel de couverture
+    linkUrl:  { type: String, trim: true, validate: { validator: v => !v || /^https?:\/\/.+/i.test(v), message: "URL invalide" } },
+    imageUrl: { type: String, trim: true, validate: { validator: v => !v || /^https?:\/\/.+/i.test(v), message: "URL invalide" } },
 
-    // Contenu
-    excerpt:    { type: String, trim: true, maxlength: 400 },
-    content:    { type: String }, // markdown/HTML/texte riche selon ton front
+    excerpt:  { type: String, trim: true, maxlength: 400 },
+    content:  { type: String },
 
-    // Publication
-    status:     { type: String, enum: ["draft", "published", "archived"], default: "draft", index: true },
-    publishedAt:{ type: Date },
+    status:      { type: String, enum: ["draft", "published", "archived"], default: "draft", index: true },
+    publishedAt: { type: Date },
 
-    // SEO (optionnel mais pratique)
     seoTitle:       { type: String, trim: true, maxlength: 180 },
     seoDescription: { type: String, trim: true, maxlength: 300 },
-    ogImage:        { type: String, trim: true, validate: urlValidator },
+    ogImage:        { type: String, trim: true, validate: { validator: v => !v || /^https?:\/\/.+/i.test(v), message: "URL invalide" } },
 
-    // Divers
-    readingTime: { type: Number, min: 0 }, // en minutes, si tu veux l’afficher
+    readingTime: { type: Number, min: 0 },
   },
-  {
-    timestamps: true,
-    versionKey: false,
-    toJSON: { virtuals: true },
-    toObject: { virtuals: true },
-  }
+  { timestamps: true, versionKey: false, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );
 
-// Slug auto si absent, ou régénérable si tu veux
+// slug auto si absent
+function slugify(str) {
+  return String(str)
+    .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-");
+}
+
 ArticleSchema.pre("validate", function (next) {
+  // normalise la catégorie si fournie
+  this.category = normalizeCategory(this.category);
+
+  if (!this.category) {
+    return next(new Error("La catégorie est requise et doit être une valeur autorisée."));
+  }
+
   if (!this.slug && this.title) {
     this.slug = slugify(this.title);
   }
   next();
 });
 
-// Published helper
-ArticleSchema.virtual("isPublished").get(function () {
-  return this.status === "published";
-});
-
-// Index recos
-ArticleSchema.index({ createdAt: -1 });
+// 👇 Unicité par couple (category, slug) pour autoriser le même slug dans 2 catégories différentes
+ArticleSchema.index({ category: 1, slug: 1 }, { unique: true });
 ArticleSchema.index({ status: 1, publishedAt: -1 });
-ArticleSchema.index({ category: 1, publishedAt: -1 });
+ArticleSchema.index({ createdAt: -1 });
 
 export default mongoose.models.Article || mongoose.model("Article", ArticleSchema);
