@@ -1,43 +1,34 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
-import dotenv from "dotenv";
-import { connectDB, dbState } from "./config/db.js";
-import routes from "./routes/index.js";
-import { notFound } from "./middlewares/notFound.js";
-import { errorHandler } from "./middlewares/errorHandler.js";
+import { connectDB } from "./config/db.js";
+import apiRouter from "./routes/index.js";
+import notFound from "./middlewares/notFound.js";
+import errorHandler from "./middlewares/errorHandler.js";
 
-dotenv.config();
 const app = express();
 
-app.use(cors());
+// ✅ Autorise les appels depuis ton front (localhost:3000)
+app.use(cors({
+  origin: ["http://localhost:3000", "http://127.0.0.1:3000"],
+  credentials: false,
+}));
+
 app.use(express.json());
 app.use(morgan("dev"));
 
-// routes
-app.use("/api", routes);
+// ✅ Connecte à MongoDB
+await connectDB(process.env.MONGODB_URI);
 
-// health DB
-app.get("/health/db", (req, res) => {
-  const stateMap = ["disconnected", "connected", "connecting", "disconnecting", "unauthorized"];
-  res.json({ dbState: dbState(), state: stateMap[dbState()] || "unknown" });
-});
+// ✅ Routes API
+app.use("/api", apiRouter);
 
-// 404 + error handler
+// ✅ Middlewares d’erreur
 app.use(notFound);
 app.use(errorHandler);
 
-// start
-const PORT = process.env.PORT || 5001;
-const URI = process.env.CONNECTION_STRING;
-
-connectDB(URI)
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`🚀 API prête sur http://localhost:${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error("Impossible de démarrer:", err);
-    process.exit(1);
-  });
+const port = process.env.PORT || 5001;
+app.listen(port, () => {
+  console.log(`🚀 API prête sur http://localhost:${port}`);
+});
